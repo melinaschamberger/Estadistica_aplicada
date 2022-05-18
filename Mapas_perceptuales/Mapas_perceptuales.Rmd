@@ -54,6 +54,7 @@ library(RColorBrewer)
 library(psych)
 library(nFactors)
 library(GPArotation)
+library(semPlot)
 
 #Datos
 Datos <- read_excel("Loyalty.xls")
@@ -114,7 +115,7 @@ KMO(Datos.sc)
 Se obtiene un **KMO = 0.86** que evidencia la pertinencia de emplear el análisis factorial para explorar los atributos de las zapatillas. 
 
 
-Habiendo verificado la validez de la técnica, se escoge el método de componentes principales para extrar los factores. 
+Habiendo verificado la validez de la técnica, se escoge el *método de componentes principales* para extrar los factores. 
 ```{r}
 Datos.pc <- prcomp(Datos.sc[, 1:9])
 summary(Datos.pc)
@@ -124,7 +125,9 @@ plot(Datos.pc, type="l", main = "Gráfico de sedimentación")
 ```
 
 
-La **varianza acumulada > 0.80** en 3 factores, aunque la **DS > 1** en sólo 2. 
+La **varianza acumulada > 0.80** en 3 componentes, aunque la **DS > 1** en sólo 2. 
+
+El gráfico de sedimentación indica que sólo son mayores que 1 los autovalores de las dos primeras variables, con lo que estas dos variables resumirán al resto representándolas de forma coherente, es decir, serán las 2 componentes principales que resumen toda la información.
 
 Se procede a realizar un biplot para ver cómo se distribuyen las respuestas. 
 
@@ -152,29 +155,67 @@ Se realiza el **análisis factorial con 2 factores**.
 ```{r}
 factanal(Datos.sc[, 1:9], factors=2)
 ```
-Considerando el biplot, se propone una rotación ortogonal. 
 
 ```{r}
-#sin rotación, 73% de la varianza explicada
-(Datos.fa.ob <- factanal(Datos.sc[, 1:9], factors=2, rotation="none"))
-#Rotación ortogonal varimax: 73% de la varianza explicada, aunque se destinguen mejor los factores
-(Datos.fa.ob.2 <- factanal(Datos.sc[, 1:9], factors=2, rotation="varimax"))
+(Datos.fa.ob <- factanal(Datos.sc[, 1:9], factors=2, rotation="varimax"))
 
-(Datos.fa.ob.3 <- factanal(Datos.sc[, 1:9], factors=2, rotation = "quartimax"))
-
-
-```
-```{r}
-heatmap.2(Datos.fa.ob.3$loadings, 
-          col=brewer.pal(9, "Greens"), trace="none", key=FALSE, dend="none",
+heatmap.2(Datos.fa.ob$loadings, 
+          col=brewer.pal(9, "Reds"), trace="none", key=FALSE, dend="none",
           Colv=FALSE, cexCol = 1.2,
-          main="\n\nFactor loadings for brand adjectives")
+          main="\n\nFactor loadings")
+
 ```
 
+
+Se observa que, con 2 factores, se alcanza un **73% de la varianza acumulada**. 
+
+
+Se analiza la estructura de los factores de manera gráfica: 
+
 ```{r}
-library(semPlot)
-semPaths(Datos.fa.ob.3, what="est", residuals=FALSE,
-         cut=0.3, posCol=c("white", "darkgreen"), negCol=c("white", "red"),
+
+semPaths(Datos.fa.ob, what="est", residuals=FALSE,
+         cut=0.3, posCol=c("white", "darkred"), negCol=c("white", "red"),
          edge.label.cex=0.75, nCharNodes=7)
 ```
 
+Se calculan las puntuaciones factoriales mediante el **método de Bartlett**: 
+
+```{r}
+Datos.fa.ob.4 <- factanal(Datos.sc[, 1:9], factors=2, rotation="oblimin", 
+                        scores="Bartlett")
+Datos.scores <- data.frame(Datos.fa.ob.4$scores)
+Datos.scores$Datos <- Datos.sc$Datos
+head(Datos.scores)
+```
+
+Finalmente, se analizan los factores con distintos tipos de rotación: 
+
+```{r}
+rot<-c("none", "varimax", "quartimax","Promax", "oblimin")
+bi_mod<-function(tipo){
+biplot.psych(fa(Datos.sc, nfactors=2, rotate=tipo, fm="mle"),
+             cex=c(1.5, 1),cuts=c(0),
+             main = paste("Biplot con rotación ", tipo),
+             col=c(2,3,4), pch = c(21,18)
+             #labels = brand.mean[,"brand"],
+             )
+}
+require(graphics)
+options(repr.plot.width = 8, repr.plot.height = 10)
+sapply(rot,bi_mod)
+```
+
+Se decide preservar la última rotación evaluada *(oblimin)*, dado que propone una asociación más nítida de cada una de las variables con el factor correspondiente.
+
+
+```{r}
+
+semPaths(Datos.fa.ob.4, what="est", residuals=FALSE,
+         cut=0.3, posCol=c("white", "darkred"), negCol=c("white", "red"),
+         edge.label.cex=0.75, nCharNodes=7)
+
+```
+
+
+El análisis realizado sugiere que existen dos perfiles vinculados a la valoración de las zapatillas: uno que prioriza aspectos vinculados a la **fidelidad cognitiva** y parece más conservador en su compra, buscando que responda a sus expectativas, sea de calidad y durable (Factor 1); y otro que pone énfasis en el precio de las zapatiillas y en variables vinculadas a la **fidelidad afectiva**, pudiendo asociarse a un público moderno o jóven que prioriza la actitud asociada al producto y las características que presenta (Factor 2). 
