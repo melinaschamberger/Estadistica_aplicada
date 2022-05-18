@@ -1,0 +1,180 @@
+---
+title: "Trabajo práctico N° 1: Mapas perceptuales"
+author: "Melina Schamberger"
+date: "16/5/2022"
+output: 
+  html_document:
+    theme: paper
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Análisis factorial
+
+
+### Problema gerencial
+
+La empresa deportiva Shoetas desea evaluar el **grado de fidelidad de los consumidores hacia las zapatillas Shoetas**. Se entrevistaron a 189 consumidores, en los que se midió la fidelidad cognitiva y la fidelidad afectiva.
+
+
+La **fidelidad cognitiva** se midió evaluando seis declaraciones en una escala de Likert de 5 puntos, que van desde 1 = completamente en desacuerdo hasta 5 = completamente de acuerdo. 
+
+Los enunciados utilizados en el cuestionario son los siguientes:
+
+- Es preferible utilizar zapatillas Shoetas (CLOY1).
+- Las características de las zapatillas de Shoetas se corresponden globalmente con mis expectativas (CLOY2).
+- Si alguien me propone que use otra marca de zapatillas, seguiré usando Shoetas por su diseño (CLOY3).
+- Si alguien me propone que use otra marca de zapatillas, seguiré usando Shoetas por su durabilidad (CLOY4).
+- Si alguien me propone que use otra marca de zapatillas, seguiré usando Shoetas por su calidad (CLOY5).
+- Si alguien me propone que use otra marca de zapatillas, seguiré usando Shoetas por su precio (CLOY6).
+
+
+La **fidelidad afectiva** se midió calificando tres afirmaciones en una escala de Likert de 5 puntos, que van desde = 1 completamente en desacuerdo hasta 5 = completamente de acuerdo. 
+
+Las afirmaciones utilizadas en el cuestionario son las siguientes:
+
+- Me gustan más los trianers de Shoetas que otras zapatillas (ALOY1).
+- Me gustan las características de mis zapatillas Shoetas (ALOY2).
+- Tengo una actitud positiva hacia las zapatillas Shoetas (ALOY3).
+
+
+Se muestran a continuación las primeras seis filas del conjunto de datos. Se observa que todos son numéricos: 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#Librerías
+library(tidyverse)
+library(readxl)
+library(kableExtra)
+library(corrplot)
+library(gplots)
+library(RColorBrewer)
+library(psych)
+library(nFactors)
+library(GPArotation)
+
+#Datos
+Datos <- read_excel("Loyalty.xls")
+tabla_1 <- head(Datos)
+kable_styling(kable(tabla_1))
+```
+En primera instancia, se realiza un análisis exploratorio de los datos:
+```{r}
+kable_styling(kable(summary(Datos)))
+```
+
+Si bien todos poseen la misma escala de medición, se estandarizan para facilitar su análisis. Se suprime la columna identificatoria de los casos. 
+```{r}
+Datos.sc <- data.frame(scale(Datos[, 1:9]))
+kable_styling(kable(summary(Datos.sc)))
+```
+
+Seguidamente, se analiza la matriz de correlación de las variables. 
+```{r}
+corrplot(cor(Datos.sc[, 1:9]), order="hclust")
+```
+
+Entre las variables vinculadas a la fidelidad afectiva, se observa que existe mayor correlación entre la variable que mide la preferencia por las zapatillas (ALOY1) y aquella que alude a la valoración de las características de las zapatillas(ALOY2). 
+
+
+Entre las variables vinculadas a la fidelidad cognitiva, se aprecia notable correlación entre la valoración del cumplimiento de las expectactivas (CLOY2) y su diseño (CLOY3) por un lado; y entre la valoración de la durabilidad (CLOY4) y la calidad (CLOY5), por otro. 
+
+
+Finalmente, entre los dos tipos de variables se observa significativa correlación entre: 
+
+- la valoración de las características de las zapatillas (ALOY2) y la del precio (CLOY6), 
+- la valoración de la actitud positiva vinculada a las zapatillas (ALOY3) y la del precio (CLOY6).
+
+Se presenta la matriz de correlación de los atributos: 
+
+```{r}
+kable_styling(kable((cor(Datos.sc[, 1:9]))))
+
+```
+
+Seguidamente, se realiza un mapa de calor para observar cómo se relacionan los atributos.
+```{r}
+
+heatmap.2(as.matrix(Datos.sc), 
+          col=brewer.pal(9, "Reds"), trace="none", key=TRUE, dend="none")
+```
+
+A los fines de avanzar en el análisis factorial, se verifica si es conveniente aplicar esta técnica mediante el Test de Bartlet. 
+```{r}
+mat_cor<-data.frame(cor(Datos.sc))
+cortest.bartlett(mat_cor,n=189)
+```
+Con el **p-value < 0.05** se rechaza la hipótesis nula (varianzas homogéneas) y se procede a realizar la medida de adecuación muestral KMO (Kaiser-Meyer-Olkin). 
+
+```{r}
+KMO(Datos.sc)
+```
+Se obtiene un **KMO = 0.86** que evidencia la pertinencia de emplear el análisis factorial para explorar los atributos de las zapatillas. 
+
+
+Habiendo verificado la validez de la técnica, se escoge el método de componentes principales para extrar los factores. 
+```{r}
+Datos.pc <- prcomp(Datos.sc[, 1:9])
+summary(Datos.pc)
+
+plot(Datos.pc, type="l", main = "Gráfico de sedimentación")
+
+```
+
+
+La **varianza acumulada > 0.80** en 3 factores, aunque la **DS > 1** en sólo 2. 
+
+Se procede a realizar un biplot para ver cómo se distribuyen las respuestas. 
+
+```{r}
+biplot(Datos.pc) 
+
+```
+
+
+Así, se avanza en realizar el análisis factorial exploratorio. 
+
+```{r}
+nScree(data.frame(Datos.sc[, 1:9]))
+
+```
+
+Del Scree plot surge que lo conveniente podría ser extrar 2 factores:
+
+```{r}
+scree(Datos.sc[, 1:9])
+eigen(cor(Datos.sc[, 1:9]))
+```
+
+Se realiza el **análisis factorial con 2 factores**. 
+```{r}
+factanal(Datos.sc[, 1:9], factors=2)
+```
+Considerando el biplot, se propone una rotación ortogonal. 
+
+```{r}
+#sin rotación, 73% de la varianza explicada
+(Datos.fa.ob <- factanal(Datos.sc[, 1:9], factors=2, rotation="none"))
+#Rotación ortogonal varimax: 73% de la varianza explicada, aunque se destinguen mejor los factores
+(Datos.fa.ob.2 <- factanal(Datos.sc[, 1:9], factors=2, rotation="varimax"))
+
+(Datos.fa.ob.3 <- factanal(Datos.sc[, 1:9], factors=2, rotation = "quartimax"))
+
+
+```
+```{r}
+heatmap.2(Datos.fa.ob.3$loadings, 
+          col=brewer.pal(9, "Greens"), trace="none", key=FALSE, dend="none",
+          Colv=FALSE, cexCol = 1.2,
+          main="\n\nFactor loadings for brand adjectives")
+```
+
+```{r}
+library(semPlot)
+semPaths(Datos.fa.ob.3, what="est", residuals=FALSE,
+         cut=0.3, posCol=c("white", "darkgreen"), negCol=c("white", "red"),
+         edge.label.cex=0.75, nCharNodes=7)
+```
+
