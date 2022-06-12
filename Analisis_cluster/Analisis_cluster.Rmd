@@ -1,0 +1,425 @@
+---
+title: 'Trabajo Práctico N° 2: Análisis de cluster'
+author: "Melina Schamberger"
+date: "11/6/2022"
+output: 
+  html_document:
+    theme: paper
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Análisis de cluster
+
+## Tickets de supermercado
+
+Los datos de los tickets de supermercado permiten construir clusters para formar segmentos de consumidores. 
+
+
+## Objetivos del análisis de cluster
+
+-  Segmentar los objetos (clientes) en grupos con perfiles similares 
+-  Una vez identificados los segmentos, las empresas/supermercados pueden formular estrategias con diferentes atractivos para distintos grupos de consumidores.
+
+### 0. Librerías
+```{r, message=FALSE, warning=FALSE, include=TRUE}
+library(tidyverse)
+library(readxl)
+library(ggthemes)
+library(ggpubr)
+library(kableExtra)
+library(cluster)
+library(factoextra)
+
+
+```
+
+
+### 1. Lectura de datos
+```{r}
+df <- read_excel("DATOS TICKETS SCENTIA.xlsx")
+tabla_1 <- head(df)
+kable_styling(kable(tabla_1))
+```
+
+
+Resumen de los datos. 
+```{r}
+tabla_2 <- summary(df)
+kable_styling(kable(tabla_2))
+```
+
+
+El primer paso es identificar cualquier atipico de la muestra antes de empezar con las particiones.
+
+Se observan valores mínimos negativos en el caso de TotalTicket$ y en CantidadUnidades.
+
+Se analizan estos casos con mayor detalle y se observa que son muy pocos:
+```{r}
+negativos <- df %>% filter(`TotalTicket$` <0) %>% head()
+tabla_3 <- negativos
+kable_styling(kable(tabla_3))
+```
+
+
+También se exploran aquellos casos donde los valores de compra son muy altos: 
+
+```{r}
+df_alto <- df %>% filter(PrecioMinimo > 20000)
+tabla_4 <- head(df_alto)
+kable_styling(kable(tabla_4))
+```
+
+
+
+### Análisis de variables
+
+#### Días de la semana
+
+Se analiza la distribución de compras en función del día de la semana
+```{r}
+dias <- df %>% group_by(DiaSemana) %>% summarise(total = n())
+tabla_6 <- dias
+kable_styling(kable(tabla_6))
+```
+
+
+Se grafica la distribución relativa de compras por día de la semana:
+```{r}
+dias_dos <- dias %>% mutate(can = 162494,
+                            fre_re = (total/can)*100) %>% arrange(-fre_re) 
+
+dias_dos$fre_re <- round(dias_dos$fre_re, 3)
+
+ggplot(data=dias_dos, 
+       aes(x=reorder(DiaSemana,-fre_re), y=fre_re)) + 
+        geom_bar(stat="identity", width = 0.5, fill = 'blue') +
+        ggtitle ("Distribución de compras según día de la semana")+
+              xlab("Día de la semana") +
+              ylab("%") +               
+              theme_hc() + 
+              theme(legend.position = "null", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+  
+
+
+```
+
+
+#### Canal de compras
+
+Se evalúa esta distribución según el canal de compra, teniendo en cuenta que el Lunes es el día con mayor compras y el Domingo el que registra la menor cantidad. 
+
+```{r}
+canal <- df %>% group_by(CANAL) %>% summarise(total = n())
+canal <- canal %>% mutate(can = 162494,
+                          fre_re = (total/can)*100)
+
+canal$fre_re <- round(canal$fre_re, 3)
+
+ggplot(data=canal, 
+       aes(x=CANAL, y=fre_re)) + 
+        geom_bar(stat="identity", width = 0.5, fill = 'lightblue') +
+        ggtitle ("Distribución de compras según canal de compras")+
+              xlab("Canal") +
+              ylab("%") +               
+              theme_hc() + 
+              theme(legend.position = "null", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+  
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+canal <- df %>% group_by(CANAL, DiaSemana) %>% summarise(total = n())
+
+ggplot(data=canal, 
+       aes(x=DiaSemana, y=total, fill= CANAL)) + 
+        geom_bar( stat="identity", position=position_dodge(),width = 0.5) +
+        ggtitle ("Distribución de compras según canal de compras")+
+              xlab("Día de la semana") +
+              ylab("Compras") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+```
+
+
+Se observa que las compras en la cadena son más frecuentes los sábados, mientras que los Lunes son los días en que más compras se realizan de manera autogestionada. 
+
+
+#### Total de tickets
+
+```{r}
+df_sin_negativos <- df %>%
+  filter(`TotalTicket$`> 0)
+
+
+df_sin_negativos %>%
+    ggplot(aes(x = `TotalTicket$`)) +
+    geom_freqpoly(color = 'blue', stat = "bin", position = "identity", bins=30) +
+              xlab("Total de tickets") +
+              ylab(" ") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+
+```
+
+
+Se visualiza la distribución de los tickets, según el canal de compra. 
+
+```{r}
+df_sin_negativos %>%
+  ggplot(aes(x = CANAL,
+               y = `TotalTicket$`,
+               color = CANAL)) +
+  geom_boxplot() +
+  xlab("Canal") +
+              ylab("Tickets ") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+
+```
+
+
+
+Realizo el gráfico quitando los outliers: 
+
+```{r}
+
+df_sin_negativos %>%
+  ggplot(aes(x = CANAL,
+               y = `TotalTicket$`,
+               color = CANAL)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim =  c(50, 800)) +
+  xlab("Canal") +
+              ylab("Tickets ") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+```
+
+
+
+#### Cantidad de unidades
+
+Se grafica la distribución de cantidad de unidades, según el canal de compra: 
+
+```{r}
+df_sin_negativos_cu <-  df %>%
+  filter(CantidadUnidades> 0)
+
+df_sin_negativos_cu %>%
+  ggplot(aes(x = CANAL,
+               y = CantidadUnidades,
+               color = CANAL)) +
+  geom_boxplot() +
+  xlab("Canal") +
+              ylab("Unidades") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+```
+
+
+
+Observando que existe una cantidad notoria de outliers, se realiza el gráfico sin estos valores: 
+
+```{r}
+
+df_sin_negativos_cu %>%
+  ggplot(aes(x = CANAL,
+               y = CantidadUnidades,
+               color = CANAL)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim =  c(0, 20)) +
+  xlab("Canal") +
+              ylab("Unidades") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+```
+
+
+Se realiza un gráfico de distribución de los tickets, según el día de compra y el canal: 
+
+
+```{r}
+
+df_reducido <- df %>% filter(`TotalTicket$` > 0 & `TotalTicket$` < 1000)
+
+ggplot(df_reducido, aes(x = `TotalTicket$`, fill = CANAL)) +
+  geom_density(alpha = 0.7) +
+  facet_wrap(~DiaSemana) +
+  xlab("Total de tickets") +
+              ylab("Densidad") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+```
+
+
+
+#### Precio mínimo
+
+Se realiza un gráfico de distribución del precio mínimo, según el día de compra y el canal: 
+
+```{r}
+
+df_reducido_bis <- df %>% filter(PrecioMinimo <= 500)
+
+ggplot(df_reducido_bis, aes(x = PrecioMinimo, fill = CANAL)) +
+  geom_density(alpha = 0.7) +
+  facet_wrap(~DiaSemana) +
+  xlab("Precio mínimo") +
+              ylab("Densidad") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+
+```
+
+
+Se grafica un boxplot del precio mínimo: 
+
+```{r}
+df %>%
+  ggplot(aes(x = CANAL,
+               y = PrecioMinimo,
+               color = CANAL)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim =  c(0, 120)) +
+  xlab("Canal") +
+              ylab("Precio mínimo") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+```
+
+### Análisis de Silhouette
+
+Se realiza un análisis de silueta para indagar cuan bien cohesionados están los grupos entre sí. 
+
+```{r}
+
+#Se excluye la variable número de ticket
+df_sin_nt <- df %>% select(-2)
+
+#Se filtran los valores en función del total de tickets y la cantidad de unidades (sin negativos)
+df_sin_nt <- df_sin_nt %>% filter(`TotalTicket$`> 0 & CantidadUnidades > 0)
+
+#obtengo muestra
+df_test <- sample_n(df_sin_nt, 10000)
+
+
+#Se seleccionan variables numéricas para poder aplicar el método de kmeans
+df_test_v <- df_test %>% select(3:17)
+df_test_v <- df_test_v %>% select(1:7)
+
+#Veo el número óptivo de clusters (obtengo muestra)
+df_test_i <- scale(df_test_v)
+set.seed(123)
+fviz_nbclust(df_test_i, kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method")
+
+```
+
+Si bien el coeficiente silueta sugiere que el mejor número de clusters es 2, se observa que el valor es superior a 0.5 en 5 clusters por lo que se decide avanzar en esa línea. 
+
+
+### Cluster por k-means
+
+Se obtiene la media de cada cluster y el tamaño de cada uno
+
+```{r}
+
+km.res <- kmeans(df_test_i, 5, nstart = 30)
+km.res
+```
+
+Se grafica la distribución de los clusters: 
+
+```{r, warning=FALSE}
+
+fviz_cluster(object = km.res, data = df_test_i, show.clust.cent = TRUE,
+             ellipse.type = "euclid", star.plot = TRUE, repel = TRUE) +
+  labs(title = "Resultados clustering K-means") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+```
+
+
+Junto los datos del canal de compra y el día de la semana para indagar cómo quedaron los grupos: 
+
+```{r}
+dias_canal <- df_test %>% select(1,2)
+datos <- df_test_v %>% mutate(cluster = km.res$cluster)
+datos <- cbind(datos, dias_canal)
+datos <- datos %>% mutate(cluster = as.factor(cluster))
+
+tabla_10 <- head(datos)
+kable_styling(kable(tabla_10))
+
+```
+
+
+Finalmente, se analizan graficamente los clusters en función de las variables de interés:
+
+```{r}
+resumen <- datos %>% group_by(CANAL, cluster) %>% summarise(total = n())
+
+ggplot(data=resumen, 
+       aes(x=cluster, y=total, fill = CANAL)) + 
+        geom_bar(stat="identity", width = 0.5) +
+        ggtitle ("Distribución de compras por cluster, según canal de compras")+
+              xlab("Cluster") +
+              ylab("") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+```
+```{r}
+
+resumen_dos <- datos %>% group_by(DiaSemana, cluster) %>% summarise(total = n())
+
+ggplot(data=resumen_dos, 
+       aes(x=cluster, y=total, fill = DiaSemana)) + 
+        geom_bar(stat="identity", width = 0.5) +
+        ggtitle ("Distribución de compras por cluster, según día de la semana")+
+              xlab("Cluster") +
+              ylab("") +               
+              theme_hc() + 
+              theme(legend.position = "top", 
+              text=element_text(size=10, 
+                                colour = "#50535C")) 
+
+```
+
