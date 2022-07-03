@@ -1,0 +1,487 @@
+---
+title: "Análisis discriminante"
+author: "Melina Schamberger"
+date: "1/7/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: yeti
+    code_folding: show
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Problema de análisis
+
+
+Este análisis se centra en el **comportamiento de los clientes de telecomunicaciones que tienen más probabilidades de abandonar la plataforma**. El objetivo radica en descubrir el comportamiento más sorprendente de los clientes a través de EDA y luego usar algunas de las técnicas de análisis predictivo para determinar los clientes que tienen más probabilidades de abandonar.
+
+
+## Sobre los datos
+
+El dataset comprende información sobre: 
+
+- Clientes que se fueron en el último mes: la columna se llama **Renuncia**
+- Servicios a los que se ha suscrito cada cliente: teléfono, varias líneas, Internet, seguridad en línea, respaldo en línea, protección de dispositivos, soporte técnico y transmisión de TV y películas
+- Información de la cuenta del cliente: cuánto tiempo ha sido cliente, contrato, método de pago, facturación electrónica, cargos mensuales y cargos totales.
+- Información demográfica sobre los clientes: sexo, rango de edad y si tienen socios y dependientes
+
+## Análisis descriptivo
+
+Se muestran a continuación las primeras seis filas del conjunto de datos: 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Se importan las librerías 
+
+library(MASS)
+library(ROCR)
+library(tidyverse)
+library(ggpubr)
+library(kableExtra)
+
+# Se cargan los datos 
+telco <- read.csv("WA_Fn-UseC_-Telco-Customer-Churn.csv")
+tabla_1 <- head(telco)
+kable_styling(kable(tabla_1))
+
+```
+
+
+Hay 7043 filas de datos para 21 variables de clientes de telecomunicaciones.
+
+
+### Limpieza del dataset
+
+Se verifica la existencia de missing cases en las distintas variables: 
+
+```{r, warning=FALSE, message=FALSE}
+options(repr.plot.width = 6, repr.plot.height = 4)
+missing_data <- telco %>% summarise_all(funs(sum(is.na(.))/n()))
+missing_data <- gather(missing_data, key = "variables", value = "percent_missing")
+
+#Gráfico
+ggplot(missing_data, aes(x = reorder(variables, percent_missing), y = percent_missing)) +
+  geom_bar(stat = "identity", fill = "#5817F5", aes(color = I('white')), size = 0.3)+
+  xlab('Variables')+
+  ylab('Valores perdidos') + 
+  coord_flip()+ 
+  theme_bw() +
+  theme(plot.title = element_text(size=12, face = "bold.italic", color = "#2e2959"),
+                          axis.text.y = element_text(size = 8, color = "#2e2959"),
+                          axis.text.x = element_text(size = 8, color = "#2e2959"),
+                          axis.title.x = element_text(color = "#2e2959"),
+                          axis.title.y = element_text(color = "#2e2959"),
+                          plot.caption = element_text(color = "#2e2959"),
+                          legend.text = element_text(color = "#2e2959"),
+                          legend.title = element_text(color = "#2e2959"),
+                          plot.subtitle = element_text(color = "#2e2959"))
+
+```
+
+Se encuentra que en la variable TotalCharges existen filas sin casos, por lo que se suprimen dichas observaciones. 
+
+```{r}
+telco <- telco[complete.cases(telco),]
+```
+
+También se modifica la escala de medición de la variable SeniorCitizen (de factor, a interger):
+
+```{r}
+telco$SeniorCitizen <- as.factor(ifelse(telco$SeniorCitizen==1, 'YES', 'NO'))
+
+```
+
+Para hacer el modelo dicriminante, se usarán solo **variables cuantitativas (tenure, MonthlyCharges, TotalCharges)** como **variables independientes** y variable **"churn (renuncia)" como variable dependiente**. 
+
+```{r}
+telco_reducido <- subset(telco, select = c(tenure, MonthlyCharges, TotalCharges, Churn))
+
+```
+
+
+Para evaluar los resultados, se divide el conjunto de datos en conjunto de entrenamiento y conjunto de prueba: 
+
+```{r}
+set.seed(100)
+test.index <- sample(1:nrow(telco_reducido), 1000)
+
+#Conjunto de entrenamiento
+training_set <- telco_reducido[-test.index,]
+
+#conjunto de prueba
+test_set <- telco_reducido[test.index,]
+
+```
+
+
+Se realizan modificaciones sobre el conjunto de datos de entrenamiento: 
+
+```{r}
+training_set_shapiro <- training_set
+
+#Se modifica la variable dependiente (VD)
+training_set_shapiro$Renuncia <- ifelse(training_set_shapiro$Churn=="Yes", "Renuncia", "No Renuncia")
+
+#Se suprime la VD en su formato anterior
+training_set_shapiro <- subset( training_set_shapiro, select = -Churn )
+
+#Se toma una muestra 
+training_set_shapiro <- sample_n(training_set_shapiro, 1500)
+
+kable_styling(kable(head(training_set_shapiro)))
+
+```
+
+También se modifica la variable dependiente para volverla factorial: 
+
+```{r}
+training_set_shapiro$Renuncia <- as.factor(training_set_shapiro$Renuncia)
+class(training_set_shapiro$Renuncia)
+```
+
+
+### Distribución de variables
+
+Habiendo preparado los datasets, se procede a indagar la distribución en cada variable: 
+
+```{r}
+options(repr.plot.width =6, repr.plot.height = 2)
+#Gráfico 
+ggplot(training_set_shapiro, aes(y= tenure, x = "", fill = Renuncia)) + 
+geom_boxplot()+ 
+theme_bw()+
+xlab(" ")+
+  theme(plot.title = element_text(size=12, face = "bold.italic", color = "#2e2959"),
+                          axis.text.y = element_text(size = 8, color = "#2e2959"),
+                          axis.text.x = element_text(size = 8, color = "#2e2959"),
+                          axis.title.x = element_text(color = "#2e2959"),
+                          axis.title.y = element_text(color = "#2e2959"),
+                          plot.caption = element_text(color = "#2e2959"),
+                          legend.text = element_text(color = "#2e2959"),
+                          legend.title = element_text(color = "#2e2959"),
+                          plot.subtitle = element_text(color = "#2e2959")) +
+  scale_fill_brewer("Renuncia", palette = "Paired")
+
+```
+
+
+Se observa que la mediana de la antiguedad es mayor en el caso de los clientes que no han renunciado al servicio. 
+
+
+
+#### **Cargas mensuales**
+
+```{r}
+ggplot(training_set_shapiro, aes(y= MonthlyCharges, x = "", fill = Renuncia)) + 
+geom_boxplot()+ 
+theme_bw()+
+xlab(" ")+
+  theme(plot.title = element_text(size=12, face = "bold.italic", color = "#2e2959"),
+                          axis.text.y = element_text(size = 8, color = "#2e2959"),
+                          axis.text.x = element_text(size = 8, color = "#2e2959"),
+                          axis.title.x = element_text(color = "#2e2959"),
+                          axis.title.y = element_text(color = "#2e2959"),
+                          plot.caption = element_text(color = "#2e2959"),
+                          legend.text = element_text(color = "#2e2959"),
+                          legend.title = element_text(color = "#2e2959"),
+                          plot.subtitle = element_text(color = "#2e2959")) +
+  scale_fill_brewer("Renuncia", palette = "Paired")
+```
+
+Los *clientes que abandonaron el servicio tienen una mediana más alta en la carga de servicios mensuales*. 
+
+
+
+#### **Cargas totales**
+
+```{r}
+ggplot(training_set_shapiro, aes(y= TotalCharges, x = "", fill = Renuncia)) + 
+geom_boxplot()+ 
+theme_bw()+
+xlab(" ")+
+  theme(plot.title = element_text(size=12, face = "bold.italic", color = "#2e2959"),
+                          axis.text.y = element_text(size = 8, color = "#2e2959"),
+                          axis.text.x = element_text(size = 8, color = "#2e2959"),
+                          axis.title.x = element_text(color = "#2e2959"),
+                          axis.title.y = element_text(color = "#2e2959"),
+                          plot.caption = element_text(color = "#2e2959"),
+                          legend.text = element_text(color = "#2e2959"),
+                          legend.title = element_text(color = "#2e2959"),
+                          plot.subtitle = element_text(color = "#2e2959")) +
+  scale_fill_brewer("Renuncia", palette = "Paired")
+
+```
+
+Los *clientes que renunciaron al servicio posee una mediana menor en sus cargas totales*, respecto a los que no renunciaron. 
+
+
+
+Luego, se realiza una representación mediante histogramas de cada variable para cada categoría de la VD: 
+
+```{r}
+
+par(mfcol = c(2, 3))
+for (k in 1:3) {
+  j0 <- names(training_set_shapiro)[k]
+  #br0 <- seq(min(datos[, k]), max(datos[, k]), le = 11)
+  x0 <- seq(min(training_set_shapiro[, k]), max(training_set_shapiro[, k]), le = 50)
+  for (i in 1:2) {
+    i0 <- levels(training_set_shapiro$Renuncia)[i]
+    x <- training_set_shapiro[training_set_shapiro$Renuncia == i0, j0]
+    hist(x, proba = T, col = grey(0.8), main = paste("Caso ", i0),
+    xlab = j0)
+    lines(x0, dnorm(x0, mean(x), sd(x)), col = "#5817F5", lwd = 2)
+  }
+}
+
+```
+
+Se muestra lo equivalente mediante otra visualización: 
+
+```{r}
+
+plot1 <- ggplot(data = training_set_shapiro, aes(x = tenure)) +
+         geom_density(aes(colour = Renuncia)) + theme_bw() +
+  theme(plot.title = element_text(size=12, face = "bold.italic", color = "#2e2959"),
+                          axis.text.y = element_text(size = 8, color = "#2e2959"),
+                          axis.text.x = element_text(size = 8, color = "#2e2959"),
+                          axis.title.x = element_text(color = "#2e2959"),
+                          axis.title.y = element_text(color = "#2e2959"),
+                          plot.caption = element_text(color = "#2e2959"),
+                          legend.text = element_text(color = "#2e2959"),
+                          legend.title = element_text(color = "#2e2959"),
+                          plot.subtitle = element_text(color = "#2e2959")) +
+  scale_color_brewer("Renuncia", palette = "Paired")
+plot2 <- ggplot(data = training_set_shapiro, aes(x = MonthlyCharges)) +
+         geom_density(aes(colour = Renuncia)) + theme_bw() +
+  theme(plot.title = element_text(size=12, face = "bold.italic", color = "#2e2959"),
+                          axis.text.y = element_text(size = 8, color = "#2e2959"),
+                          axis.text.x = element_text(size = 8, color = "#2e2959"),
+                          axis.title.x = element_text(color = "#2e2959"),
+                          axis.title.y = element_text(color = "#2e2959"),
+                          plot.caption = element_text(color = "#2e2959"),
+                          legend.text = element_text(color = "#2e2959"),
+                          legend.title = element_text(color = "#2e2959"),
+                          plot.subtitle = element_text(color = "#2e2959")) +
+  scale_color_brewer("Renuncia", palette = "Paired")
+plot3 <- ggplot(data = training_set_shapiro, aes(x = TotalCharges)) +
+         geom_density(aes(colour = Renuncia)) + theme_bw() +
+  theme(plot.title = element_text(size=12, face = "bold.italic", color = "#2e2959"),
+                          axis.text.y = element_text(size = 8, color = "#2e2959"),
+                          axis.text.x = element_text(size = 8, color = "#2e2959"),
+                          axis.title.x = element_text(color = "#2e2959"),
+                          axis.title.y = element_text(color = "#2e2959"),
+                          plot.caption = element_text(color = "#2e2959"),
+                          legend.text = element_text(color = "#2e2959"),
+                          legend.title = element_text(color = "#2e2959"),
+                          plot.subtitle = element_text(color = "#2e2959")) +
+  scale_color_brewer("Renuncia", palette = "Paired")
+
+ggarrange(plot1, plot2, plot3, common.legend = TRUE, legend = "bottom")
+```
+
+
+## Supuestos
+
+### Normalidad
+
+Se realiza el **contraste de normalidad** Shapiro-Wilk para cada variable, según la categoría de abandono
+
+```{r, warning=FALSE, message=FALSE}
+
+library(reshape2)
+library(knitr)
+library(dplyr)
+datos_tidy <- melt(training_set_shapiro, value.name = "valor")
+kable(datos_tidy %>% group_by(Renuncia, variable) %>% summarise(p_value_Shapiro.test = round(shapiro.test(valor)$p.value,10)))
+
+```
+Se verifica en todos los casos un **p-value < 0.05**. 
+
+### Homogeneidad de varianzas
+
+Se procede a verificar la **homogeneidad de varianzas** mediante el test de Bartlett. 
+
+```{r}
+options(scipen = 999)
+
+bartlett.test(training_set_shapiro$tenure~training_set_shapiro$Renuncia)
+bartlett.test(training_set_shapiro$MonthlyCharges~training_set_shapiro$Renuncia)
+bartlett.test(training_set_shapiro$TotalCharges~training_set_shapiro$Renuncia)
+
+```
+
+Se observa que en todos los casos el **p-value < 0,05**, por lo que se rechaza la H0 que afirma igualdad de varianzas. 
+
+### Test  M de Box
+
+La hipótesis nula para esta prueba es que las matrices de covarianza observadas para las variables dependientes son iguales en todos los grupos. En otras palabras, un resultado de prueba no significativo (es decir, uno con un valor p grande) indica que las matrices de covarianza son iguales. La estadística de prueba generada se llama estadística M de Box.
+
+Esta prueba informará un resultado estadísticamente significativo cuando en realidad no exista uno. 
+
+
+```{r, warning=FALSE, message=FALSE}
+
+library(biotools)
+boxM(data=training_set_shapiro[, 1:3], group=training_set_shapiro$Renuncia)
+
+```
+
+*Se rechaza la H0*. 
+
+## Modelo
+
+El primer resultado es un *modelo discriminante lineal* que puede predecir qué personas se irían usando las variables independientes. Después de hacer este modelo, se calcula la relación de clasificación correcta.
+
+```{r}
+#linear discrimanant model
+lda1 <- lda(formula = Churn ~ tenure + MonthlyCharges + TotalCharges, data= training_set)
+
+#training (0,78)
+predicted_lda1_train <- predict(lda1, newdata = training_set)
+table(training_set$Churn, predicted_lda1_train$class)
+cat("Accuracy training: ",sum(diag(as.matrix(table(training_set$Churn, predicted_lda1_train$class)))) / sum(sum(as.matrix(table(training_set$Churn, predicted_lda1_train$class)))))
+
+
+#test (0,78)
+predicted_lda1 <- predict(lda1, newdata = test_set)
+table(test_set$Churn, predicted_lda1$class)
+cat("Accuracy testing: ",sum(diag(as.matrix(table(test_set$Churn, predicted_lda1$class)))) / sum(sum(as.matrix(table(test_set$Churn, predicted_lda1$class)))))
+```
+
+Salida del modelo de discriminante lineal:
+
+```{r}
+lda1
+```
+
+
+Se dibujan las áreas que se delimitan para cada una de las variables:
+
+```{r, warning=FALSE}
+library(klaR)
+partimat(Renuncia ~ tenure + MonthlyCharges + TotalCharges,
+         data= training_set_shapiro, method = "lda", prec = 10,
+         image.colors = c("darkgoldenrod1", "skyblue2"),
+         col.mean = "firebrick")
+
+```
+
+
+### Comparación de modelo lineal y modelo no lineal
+
+El modelo discriminante lineal muestra aproximadamente un 78% de precisión. El siguiente modelo es el *modelo discriminatorio no lineal*.
+
+
+
+```{r}
+
+#nonliner discrimanant model
+qda1 <-  qda(formula = Churn ~ tenure + MonthlyCharges + TotalCharges, data= training_set)
+
+#trainign (74%)
+predicted_qda1_train <- predict(qda1, newdata = training_set)
+table(training_set$Churn, predicted_qda1_train$class)
+cat("Accuracy training: ",sum(diag(as.matrix(table(training_set$Churn, predicted_qda1_train$class)))) / sum(sum(as.matrix(table(training_set$Churn, predicted_qda1_train$class)))))
+
+#test (72%)
+predicted_qda1 <-  predict(qda1, newdata = test_set)
+table(test_set$Churn, predicted_qda1$class)
+#the ratio of correct ratio of correct classification.
+cat("Accuracy training: ",sum(diag(as.matrix(table(test_set$Churn, predicted_qda1$class)))) / sum(sum(as.matrix(table(test_set$Churn, predicted_qda1$class)))))
+
+```
+
+Salida del modelo de discriminante no lineal:
+
+```{r}
+qda1
+```
+
+Se dibujan las áreas que se delimitan para cada una de las variables:
+
+```{r}
+partimat(formula = Renuncia ~ tenure + MonthlyCharges + TotalCharges,
+         data= training_set_shapiro,
+         method = "qda", prec = 5,
+         image.colors = c("darkgoldenrod1", "skyblue2"),
+         col.mean = "firebrick")
+```
+
+
+El *modelo discriminante no lineal muestra aproximadamente el 72% de precisión*. **Es mejor la predicción del modelo discriminante lineal**.
+
+### CURVA ROC
+
+Por último, se analiza la comparación de modelos mediante una curva ROC para cada modelo.
+
+```{r}
+
+#ROC curve
+#linear discrimininant
+par(mfrow = c(2,1))
+lda1_p <- predict(lda1, newdata = test_set, type = "response")
+lda1_pr <- prediction(as.numeric(lda1_p$class), test_set$Churn)
+lda1_prf <- performance(lda1_pr, measure = "tpr", x.measure = "fpr")
+plot(lda1_prf, main = 'ROC curve of linear discriminant model')
+
+lda1_auc <- performance(lda1_pr, measure = "auc")
+lda1_auc <- lda1_auc@y.values
+cat("AUC Discriminante Lineal: ",round(as.numeric(lda1_auc), digits = 4))
+
+
+#nonlinear discriminant model
+qda1_p <- predict(qda1, newdata = test_set, type = "response")
+qda1_pr <- prediction(as.numeric(qda1_p$class), test_set$Churn)
+qda1_prf <- performance(qda1_pr, measure = "tpr", x.measure = "fpr")
+plot(qda1_prf, main = 'ROC curve of nonlinear discriminant model')
+
+qda1_auc <- performance(qda1_pr, measure = "auc")
+qda1_auc <- qda1_auc@y.values
+cat("Discriminante no lineal: ",round(as.numeric(qda1_auc), digits = 4))
+
+```
+
+## Resultado de comparación
+
+Desde la curva ROC y AUC (Área bajo la curva), el AUC de los modelos es similar (Lineal = 0.69; No lineal = 0.70) lo que indica que el modelo es aceptable. 
+
+
+## Predicción de nuevos clientes
+
+Finalmente, se prueba realizar una estimación para un nuevo cliente para saber si va a abandonar los servicios o no. 
+
+
+### Prueba 1 
+
+```{r}
+nuevas_observaciones <- data.frame(tenure = 10, MonthlyCharges = 57, TotalCharges = 1800)
+
+predict(object = lda1, newdata = nuevas_observaciones)
+
+```
+
+### Prueba 2
+
+```{r}
+nuevas_observaciones <- data.frame(tenure = 50, MonthlyCharges = 127, TotalCharges = 2800)
+
+predict(object = lda1, newdata = nuevas_observaciones)
+
+```
+
+## Conclusión
+
+Se verifica que ante más antiguedad y más cargas mensuales, más probable es la predicción de abandono del servicio. Si bien las cargas totales siguen una tendencia alejada de la mediana observada en cada categoría, cabe considerar que este es el coeficiente con menor peso en el modelo. Estos resultados son similares a los obtenidos mediante la aplicación del método del regresión logística. 
+
+
+
+
+
+
+
